@@ -74,13 +74,10 @@ const CARD_INFO_STYLE = {
 /* ---------------------------------------------------------------------------
    Constantes de cálculo (consumo médio por pessoa, taxas de atividades)
 --------------------------------------------------------------------------- */
-/* Consumo diário monitorável por pessoa: representa exclusivamente as atividades
-   que o app consegue registrar (banho ~72L + roupa ~17L + carro/calçada ~3L ≈ 92L).
-   NÃO inclui vaso sanitário, cozinha ou lavatório — esses não são registráveis.
-   Valor 90 L/dia torna a META comparável ao CONSUMO que o usuário vai inserir.
+/* Consumo diário base por pessoa, usado para calcular a meta mensal de consumo.
    Fonte: ANA (PNCDA), SABESP — taxas de uso por atividade doméstica. */
-const CONSUMO_PESSOA_DIA_L = 90; // L/dia por pessoa (atividades rastreáveis pelo app)
-const CONSUMO_PESSOA_MES_L = CONSUMO_PESSOA_DIA_L * 30; // 2700 L/mês por pessoa
+const CONSUMO_PESSOA_DIA_L = 120; // L/dia por pessoa (consumo base da aplicação)
+const CONSUMO_PESSOA_MES_L = CONSUMO_PESSOA_DIA_L * 30; // 3600 L/mês por pessoa
 
 /* Jardim: 3 regas/semana × 10 min × 10 L/min × ~5 semanas = 1500 L/mês.
    Fonte: ANA — mangueira doméstica 10-15 L/min; frequência observada em clima tropical. */
@@ -95,8 +92,8 @@ const AJUSTE_PISCINA_FATOR = 0.10;
 const FATOR_APARTAMENTO = 0.88; // apartamento reduz 12% do consumo base
 const TARIFA_PADRAO = 8.5; // R$ por m³
 
-/* Calcula a meta mensal (consumo rastreável estimado) em litros:
-   consumo_base = moradores × 2700 L/mês  (atividades mensuráveis pelo app)
+/* Calcula a meta mensal (consumo base estimado) em litros:
+   consumo_base = moradores × 3600 L/mês  (120 L/dia por pessoa)
    ajuste_tipo  = consumo_base × 0.88     (somente apartamento — SNIS 2022)
    ajuste_jardim= 1500 L/mês fixo         (ANA: 3 regas/semana × 10 min × 10 L/min)
    ajuste_piscina = capacidade × 10 %    (ANA/CAESB: evaporação + reposição mensal)
@@ -725,6 +722,8 @@ export default function App() {
             residencia={residencia}
             setResidencia={setResidencia}
             consumoBaseM3={consumoBaseM3}
+            metaPercentual={metaPercentual}
+            tarifa={tarifa}
             onSalvar={finalizarCadastro}
             onVoltar={() => setFase("onboarding")}
           />
@@ -891,31 +890,28 @@ function ConfirmarFinalizarMes({ semanasFaltando, onVoltar, onConfirmar }) {
         background: "#fff", borderRadius: 22, padding: "20px 20px",
         maxWidth: 340, width: "100%", boxShadow: "0 20px 50px -10px rgba(22,50,74,0.35)",
       }}>
-        <div style={{
-          width: 44, height: 44, borderRadius: "50%",
-          background: tudoConcluido ? "#EAF8EF" : "#FDEDED",
-          display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 14,
-        }}>
-          {tudoConcluido
-            ? <Check size={22} color={COLORS.green} />
-            : <AlertTriangle size={22} color={COLORS.alert} />}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginBottom: 8 }}>
+          <div style={{
+            width: 44, height: 44, borderRadius: "50%",
+            background: tudoConcluido ? "#EAF8EF" : "#FDEDED",
+            display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+          }}>
+            {tudoConcluido
+              ? <Check size={22} color={COLORS.green} />
+              : <AlertTriangle size={22} color={COLORS.alert} />}
+          </div>
+          <p style={{ margin: 0, fontWeight: 700, fontSize: 16, color: COLORS.ink, textAlign: "center" }}>
+            {tudoConcluido ? "Finalizar este mês?" : "Você ainda não concluiu todas as semanas deste mês."}
+          </p>
         </div>
 
         {tudoConcluido ? (
-          <>
-            <p style={{ margin: "0 0 8px", fontWeight: 700, fontSize: 16, color: COLORS.ink }}>
-              Finalizar este mês?
-            </p>
-            <p style={{ margin: "0 0 18px", fontSize: 13.5, color: COLORS.inkSoft, lineHeight: 1.5 }}>
-              Todas as semanas já foram concluídas. Ao confirmar, um novo mês será iniciado.
-            </p>
-          </>
+          <p style={{ margin: "0 0 18px", fontSize: 13.5, color: COLORS.inkSoft, lineHeight: 1.5, textAlign: "center" }}>
+            Todas as semanas já foram concluídas. Ao confirmar, um novo mês será iniciado.
+          </p>
         ) : (
           <>
-            <p style={{ margin: "0 0 8px", fontWeight: 700, fontSize: 16, color: COLORS.ink }}>
-              Você ainda não concluiu todas as semanas deste mês.
-            </p>
-            <p style={{ margin: "0 0 14px", fontSize: 13.5, color: COLORS.inkSoft, lineHeight: 1.5 }}>
+            <p style={{ margin: "0 0 14px", fontSize: 13.5, color: COLORS.inkSoft, lineHeight: 1.5, textAlign: "center" }}>
               Encerrar agora pode gerar estimativas menos precisas.
             </p>
             <p style={{ margin: "0 0 16px", fontSize: 13.5, color: COLORS.ink, lineHeight: 1.5 }}>
@@ -957,18 +953,20 @@ function ConfirmarFinalizarSemana({ semana, onVoltar, onConfirmar }) {
         background: "#fff", borderRadius: 22, padding: "20px 20px",
         maxWidth: 340, width: "100%", boxShadow: "0 20px 50px -10px rgba(22,50,74,0.35)",
       }}>
-        <div style={{
-          width: 44, height: 44, borderRadius: "50%", background: "#FDEDED",
-          display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 14,
-        }}>
-          <AlertTriangle size={22} color={COLORS.alert} />
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginBottom: 8 }}>
+          <div style={{
+            width: 44, height: 44, borderRadius: "50%", background: "#FDEDED",
+            display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+          }}>
+            <AlertTriangle size={22} color={COLORS.alert} />
+          </div>
+          <p style={{ margin: 0, fontWeight: 700, fontSize: 16, color: COLORS.ink, textAlign: "center" }}>
+            {semanaVazia
+              ? `A Semana ${semana.numero} ainda não tem nenhuma atividade registrada.`
+              : `Deseja mesmo finalizar a Semana ${semana.numero}?`}
+          </p>
         </div>
-        <p style={{ margin: "0 0 8px", fontWeight: 700, fontSize: 16, color: COLORS.ink }}>
-          {semanaVazia
-            ? `A Semana ${semana.numero} ainda não tem nenhuma atividade registrada.`
-            : `Deseja mesmo finalizar a Semana ${semana.numero}?`}
-        </p>
-        <p style={{ margin: "0 0 18px", fontSize: 13.5, color: COLORS.inkSoft, lineHeight: 1.5 }}>
+        <p style={{ margin: "0 0 18px", fontSize: 13.5, color: COLORS.inkSoft, lineHeight: 1.5, textAlign: "center" }}>
           {semanaVazia
             ? "Finalizar agora vai marcar esta semana como concluída com 0 L de consumo. Depois de concluída, não será mais possível adicionar ou editar registros nela."
             : "Depois de concluída, não será mais possível adicionar, editar ou excluir nenhum registro desta semana. Essa ação não pode ser desfeita."}
@@ -1001,6 +999,11 @@ function GlobalStyle() {
       body { margin: 0; }
       .scrollnobar::-webkit-scrollbar { display: none; }
       .scrollnobar { scrollbar-width: none; }
+      /* Oculta a barra de rolagem em toda a aplicação, mantendo o scroll funcional */
+      html, body { scrollbar-width: none; -ms-overflow-style: none; }
+      html::-webkit-scrollbar, body::-webkit-scrollbar { display: none; }
+      * { scrollbar-width: none; -ms-overflow-style: none; }
+      *::-webkit-scrollbar { display: none; width: 0; height: 0; }
       button { font-family: ${FONT_BODY}; cursor: pointer; }
       input, textarea { font-family: ${FONT_BODY}; color: ${COLORS.ink}; }
       input::placeholder, textarea::placeholder { color: ${COLORS.inkSoft}; opacity: 0.7; }
@@ -1340,7 +1343,7 @@ function Onboarding({ step, setStep, onFinish }) {
 /* ============================================================================
    2. Cadastro da Residência
 ============================================================================ */
-function CadastroResidencia({ residencia, setResidencia, consumoBaseM3, onSalvar, onVoltar }) {
+function CadastroResidencia({ residencia, setResidencia, consumoBaseM3, metaPercentual, tarifa, onSalvar, onVoltar }) {
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <ScreenHeader title="Sobre sua residência" onBack={onVoltar} />
@@ -1418,7 +1421,7 @@ function CadastroResidencia({ residencia, setResidencia, consumoBaseM3, onSalvar
         )}
 
         {residencia.tipo !== null && residencia.jardim !== null && residencia.piscina !== null && (
-          <PreviewMetaCadastro residencia={residencia} />
+          <PreviewMetaCadastro residencia={residencia} metaPercentual={metaPercentual} tarifa={tarifa} />
         )}
       </div>
       <div style={{ padding: "16px 20px 24px", background: COLORS.bg }}>
@@ -1437,10 +1440,14 @@ function CadastroResidencia({ residencia, setResidencia, consumoBaseM3, onSalvar
 }
 
 /* Mostra, já durante o cadastro, a meta mensal, a média por pessoa e o valor
-   estimado da conta calculados a partir do perfil informado até aqui. */
-function PreviewMetaCadastro({ residencia }) {
-  const metaL = calcularMetaMensalL(residencia);
-  const valorEstimado = +(metaL / 1000 * TARIFA_PADRAO).toFixed(2);
+   estimado da conta calculados a partir do perfil informado até aqui, já
+   aplicando o percentual de economia configurado (mesmo cálculo do Dashboard). */
+function PreviewMetaCadastro({ residencia, metaPercentual, tarifa }) {
+  const moradores = Math.max(1, residencia.moradores || 1);
+  const metaBaseL = calcularMetaMensalL(residencia);
+  const metaL = Math.round(metaBaseL * (1 - metaPercentual / 100));
+  const mediaPessoaDiaL = Math.round(metaL / 30 / moradores);
+  const valorEstimado = +(metaL / 1000 * tarifa).toFixed(2);
 
   return (
     <Card style={{ marginTop: 4, background: "#E4F2FB", border: "none" }}>
@@ -1454,7 +1461,7 @@ function PreviewMetaCadastro({ residencia }) {
         </div>
         <div>
           <p style={{ margin: 0, fontSize: 11, color: "#0F2A42", fontWeight: 600, lineHeight: 1.4 }}>Média por pessoa</p>
-          <p style={{ margin: "2px 0 0", fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 15, color: COLORS.ink }}>{CONSUMO_PESSOA_DIA_L} L/dia</p>
+          <p style={{ margin: "2px 0 0", fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 15, color: COLORS.ink }}>{mediaPessoaDiaL} L/dia</p>
         </div>
         <div>
           <p style={{ margin: 0, fontSize: 11, color: "#0F2A42", fontWeight: 600, lineHeight: 1.4 }}>Valor estimado da conta</p>
@@ -1635,13 +1642,13 @@ function Dashboard({
           style={{
             width: "100%", textAlign: "left", border: `1.5px solid #BEE6CC`,
             background: "#EAF8EF", borderRadius: 18, padding: "16px 18px",
-            display: "flex", gap: 12, alignItems: "flex-start", minHeight: 44,
+            display: "flex", gap: 12, alignItems: "center", minHeight: 44,
             boxShadow: "0 10px 24px -10px rgba(39,174,96,0.35)",
           }}
         >
           <div style={{
             width: 36, height: 36, borderRadius: "50%", background: COLORS.green,
-            display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 1,
+            display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
           }}>
             <Check size={18} color="#fff" />
           </div>
@@ -1651,7 +1658,7 @@ function Dashboard({
               A conta real pode ser adicionada em Registros quando estiver disponível.
             </p>
           </div>
-          <ChevronRight size={18} color="#1E8449" style={{ marginTop: 8, flexShrink: 0 }} />
+          <ChevronRight size={18} color="#1E8449" style={{ flexShrink: 0 }} />
         </button>
       </div>
 
@@ -1660,11 +1667,11 @@ function Dashboard({
         <div style={{
           marginTop: 14, padding: "16px 18px", borderRadius: 18,
           border: `1.5px solid #F6D89A`, background: "#FFFBF0",
-          display: "flex", alignItems: "flex-start", gap: 12,
+          display: "flex", alignItems: "center", gap: 12,
         }}>
           <div style={{
             width: 36, height: 36, borderRadius: "50%", background: "#FEF3CD",
-            display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 1,
+            display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
           }}>
             <Receipt size={18} color="#B7791F" />
           </div>
@@ -1904,7 +1911,7 @@ function TelaSemanaConteudo({
   const dentro = semana.consumoL <= metaSemanal;
 
   return (
-    <div style={{ padding: embutido ? "0 20px 100px" : "20px 20px 28px" }}>
+    <div style={{ padding: embutido ? "0 20px 24px" : "20px 20px 28px" }}>
       {mostrarSeletor && (
         <>
           <h1 style={TITLE_STYLE}>Semana atual</h1>
@@ -1955,7 +1962,7 @@ function TelaSemanaConteudo({
           {dentro ? "Você está dentro da meta semanal!" : "Você passou da meta semanal."}
         </p>
         <div style={{ width: 1, alignSelf: "stretch", background: dentro ? "#BEE6CC" : "#F6C6C6" }} />
-        <div style={{ flexShrink: 0, textAlign: "right" }}>
+        <div style={{ flexShrink: 0, textAlign: "center" }}>
           <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: COLORS.ink, whiteSpace: "nowrap" }}>
             Restam {fmtL(restamSemana)}
           </p>
@@ -2073,13 +2080,13 @@ function TelaSemanaConteudo({
             style={{
               width: "100%", textAlign: "left", border: `1.5px solid #BEE6CC`,
               background: "#EAF8EF", borderRadius: 18, padding: "16px 18px",
-              display: "flex", gap: 12, alignItems: "flex-start", minHeight: 44,
+              display: "flex", gap: 12, alignItems: "center", minHeight: 44,
               boxShadow: "0 10px 24px -10px rgba(39,174,96,0.35)",
             }}
           >
             <div style={{
               width: 36, height: 36, borderRadius: "50%", background: COLORS.green,
-              display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 1,
+              display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
             }}>
               <Check size={18} color="#fff" />
             </div>
@@ -2089,7 +2096,7 @@ function TelaSemanaConteudo({
                 Marca a Semana {semana.numero} como concluída.
               </p>
             </div>
-            <ChevronRight size={18} color="#1E8449" style={{ marginTop: 8, flexShrink: 0 }} />
+            <ChevronRight size={18} color="#1E8449" style={{ flexShrink: 0 }} />
           </button>
         </div>
       )}
@@ -2192,16 +2199,16 @@ function EscolherAtividade({ onVoltar, onEscolher, residencia }) {
           marginTop: 16,
           border: `1.5px solid ${COLORS.line}`,
           borderRadius: 18,
-          padding: "14px 16px",
+          padding: "18px 16px 14px",
           background: "#fff",
           display: "flex",
-          alignItems: "flex-start",
+          alignItems: "center",
           gap: 12,
           boxShadow: "0 2px 8px rgba(22,50,74,0.06)",
         }}>
-          <span style={{ fontSize: 20, flexShrink: 0, marginTop: 1 }}>💡</span>
-          <div>
-            <p style={{ margin: "0 0 3px", fontWeight: 700, fontSize: 13, color: COLORS.ink }}>Dica</p>
+          <span style={{ fontSize: 20, flexShrink: 0 }}>💡</span>
+          <div style={{ flex: 1, textAlign: "center" }}>
+            <p style={{ margin: "0 0 6px", fontWeight: 700, fontSize: 13, color: COLORS.ink }}>Dica</p>
             <p style={{ margin: 0, fontSize: 12.5, color: COLORS.inkSoft, lineHeight: 1.5 }}>
               Quanto mais precisas forem as informações, mais precisa será sua estimativa.
             </p>
@@ -2337,13 +2344,13 @@ function FormAtividade({ atividade, capacidadePiscina, onVoltar, onSalvar }) {
         {/* Card dica */}
         <div style={{
           border: `1.5px solid ${COLORS.line}`, borderRadius: 18,
-          background: "#fff", padding: "14px 16px", marginBottom: 8,
+          background: "#fff", padding: "18px 16px 14px", marginBottom: 8,
           boxShadow: "0 2px 8px rgba(22,50,74,0.06)",
         }}>
-          <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
-            <span style={{ fontSize: 18, flexShrink: 0, marginTop: 1 }}>💡</span>
-            <div>
-              <p style={{ margin: "0 0 3px", fontWeight: 700, fontSize: 13, color: COLORS.ink }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontSize: 18, flexShrink: 0 }}>💡</span>
+            <div style={{ flex: 1, textAlign: "center" }}>
+              <p style={{ margin: "0 0 6px", fontWeight: 700, fontSize: 13, color: COLORS.ink }}>
                 Dica para economizar
               </p>
               <p style={{ margin: 0, fontSize: 12.5, color: COLORS.inkSoft, lineHeight: 1.5 }}>
@@ -2670,7 +2677,8 @@ function Ajustes({
   const [tarifaTexto, setTarifaTexto] = useState(String(tarifa));
   const [residenciaDraft, setResidenciaDraft] = useState(residencia);
 
-  const houveAlteracao = metaDraft !== metaPercentual || tarifaDraft !== tarifa;
+  const houveAlteracaoMeta = metaDraft !== metaPercentual;
+  const houveAlteracaoTarifa = tarifaDraft !== tarifa;
   const houveAlteracaoResidencia =
     residenciaDraft.moradores !== residencia.moradores ||
     residenciaDraft.jardim !== residencia.jardim ||
@@ -2706,7 +2714,7 @@ function Ajustes({
       <p style={SUBTITLE_STYLE}>Ajuste suas metas, tarifa e dados da residência.</p>
 
       <SectionTitle>Metas de economia</SectionTitle>
-      <Card style={{ marginBottom: 14 }}>
+      <Card style={{ marginBottom: houveAlteracaoMeta ? 12 : 14 }}>
         <p id="meta-economia-label" style={{ margin: "0 0 4px", fontWeight: 700, fontSize: 14, color: COLORS.ink }}>Quanto você quer economizar?</p>
         <p id="meta-economia-desc" style={{ margin: "0 0 14px", fontSize: 12.5, color: COLORS.inkSoft, lineHeight: 1.6 }}>
           Defina quanto deseja reduzir do seu consumo mensal em relação ao consumo estimado da sua residência, isso não altera o consumo da casa, apenas a meta que o app usa para acompanhar seu progresso.
@@ -2738,9 +2746,47 @@ function Ajustes({
         </div>
       </Card>
 
+      {houveAlteracaoMeta && (
+        <div
+          role="status" aria-live="polite"
+          style={{
+          marginBottom: 18, padding: "16px 18px", borderRadius: 18,
+          background: "#FFF8E6", border: "1.5px solid #F5E0A3",
+          display: "flex", flexDirection: "column", gap: 14,
+          animation: "fadeUp 0.2s ease-out",
+        }}>
+          <div>
+            <p style={{ margin: 0, fontSize: 13.5, fontWeight: 700, color: COLORS.ink }}>Deseja salvar as alterações?</p>
+            <p style={{ margin: "2px 0 0", fontSize: 12, color: COLORS.inkSoft }}>Você modificou a meta de economia.</p>
+          </div>
+          <div style={{ display: "flex", justifyContent: "center", gap: 10 }}>
+            <button
+              onClick={descartarAlteracoes}
+              aria-label="Descartar alteração da meta de economia"
+              style={{
+                padding: "10px 16px", borderRadius: 12, border: `1.5px solid ${COLORS.line}`,
+                background: "#fff", color: COLORS.inkSoft, fontWeight: 700, fontSize: 13.5, minHeight: 40,
+              }}
+            >
+              Não
+            </button>
+            <button
+              onClick={salvarAlteracoes}
+              aria-label="Salvar alteração da meta de economia"
+              style={{
+                padding: "10px 16px", borderRadius: 12, border: "none",
+                background: COLORS.green, color: "#fff", fontWeight: 700, fontSize: 13.5, minHeight: 40,
+                display: "flex", alignItems: "center", gap: 6,
+              }}
+            >
+              <Check size={15} /> Sim, salvar
+            </button>
+          </div>
+        </div>
+      )}
+
       <SectionTitle>Tarifa da água</SectionTitle>
-      <Card style={{ marginBottom: houveAlteracao ? 12 : 18 }}>
-        <p id="tarifa-label" style={{ margin: "0 0 4px", fontWeight: 700, fontSize: 14, color: COLORS.ink }}>Tarifa da água</p>
+      <Card style={{ marginBottom: houveAlteracaoTarifa ? 12 : 18 }}>
         <p id="tarifa-desc" style={{ margin: "0 0 12px", fontSize: 12.5, color: COLORS.inkSoft, lineHeight: 1.6 }}>
           Informe o valor cobrado pela concessionária por metro cúbico (m³). Essa informação pode ser encontrada na sua conta de água e será utilizada para estimar o valor da fatura.
         </p>
@@ -2763,7 +2809,7 @@ function Ajustes({
         </div>
       </Card>
 
-      {houveAlteracao && (
+      {houveAlteracaoTarifa && (
         <div
           role="status" aria-live="polite"
           style={{
@@ -2774,12 +2820,12 @@ function Ajustes({
         }}>
           <div>
             <p style={{ margin: 0, fontSize: 13.5, fontWeight: 700, color: COLORS.ink }}>Deseja salvar as alterações?</p>
-            <p style={{ margin: "2px 0 0", fontSize: 12, color: COLORS.inkSoft }}>Você modificou a meta de economia ou a tarifa.</p>
+            <p style={{ margin: "2px 0 0", fontSize: 12, color: COLORS.inkSoft }}>Você modificou a tarifa da água.</p>
           </div>
           <div style={{ display: "flex", justifyContent: "center", gap: 10 }}>
             <button
               onClick={descartarAlteracoes}
-              aria-label="Descartar alterações da meta e tarifa"
+              aria-label="Descartar alteração da tarifa da água"
               style={{
                 padding: "10px 16px", borderRadius: 12, border: `1.5px solid ${COLORS.line}`,
                 background: "#fff", color: COLORS.inkSoft, fontWeight: 700, fontSize: 13.5, minHeight: 40,
@@ -2789,7 +2835,7 @@ function Ajustes({
             </button>
             <button
               onClick={salvarAlteracoes}
-              aria-label="Salvar alterações da meta e tarifa"
+              aria-label="Salvar alteração da tarifa da água"
               style={{
                 padding: "10px 16px", borderRadius: 12, border: "none",
                 background: COLORS.green, color: "#fff", fontWeight: 700, fontSize: 13.5, minHeight: 40,
