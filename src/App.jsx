@@ -2143,6 +2143,7 @@ function EscolherAtividade({ onVoltar, onEscolher, residencia }) {
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <ScreenHeader title="Adicionar consumo" onBack={onVoltar} />
       <div className="scrollnobar" style={{ flex: 1, overflowY: "auto", padding: "0 20px 24px" }}>
+        <div style={{ display: "flex", flexDirection: "column", minHeight: "100%" }}>
         <p style={{ margin: "0 0 12px", color: COLORS.inkSoft, fontSize: 13, fontWeight: 600, lineHeight: 1.5 }}>
           Escolha a atividade
         </p>
@@ -2202,9 +2203,9 @@ function EscolherAtividade({ onVoltar, onEscolher, residencia }) {
           })}
         </div>
 
-        {/* Card de dica — igual ao sketch */}
+        {/* Card de dica — igual ao sketch — empurrado para o final via marginTop: auto */}
         <div style={{
-          marginTop: 16,
+          marginTop: "auto",
           border: `1.5px solid ${COLORS.line}`,
           borderRadius: 18,
           padding: "18px 16px 14px",
@@ -2221,6 +2222,7 @@ function EscolherAtividade({ onVoltar, onEscolher, residencia }) {
               Quanto mais precisas forem as informações, mais precisa será sua estimativa.
             </p>
           </div>
+        </div>
         </div>
       </div>
     </div>
@@ -2240,6 +2242,7 @@ function FormAtividade({ atividade, capacidadePiscina, onVoltar, onSalvar }) {
       <ScreenHeader title={atividade.nome} onBack={onVoltar} />
 
       <div className="scrollnobar" style={{ flex: 1, overflowY: "auto", padding: "4px 20px 24px" }}>
+        <div style={{ display: "flex", flexDirection: "column", minHeight: "100%" }}>
 
         {/* Texto informativo */}
         <p style={{ ...SUBTITLE_STYLE, margin: "0 0 18px" }}>
@@ -2349,10 +2352,11 @@ function FormAtividade({ atividade, capacidadePiscina, onVoltar, onSalvar }) {
           </div>
         </div>
 
-        {/* Card dica */}
+        {/* Card dica — empurrado para o final do container flex (não usa margin-top fixo) */}
         <div style={{
           border: `1.5px solid ${COLORS.line}`, borderRadius: 18,
           background: "#fff", padding: "18px 16px 14px", marginBottom: 8,
+          marginTop: "auto",
           boxShadow: "0 2px 8px rgba(22,50,74,0.06)",
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -2366,6 +2370,7 @@ function FormAtividade({ atividade, capacidadePiscina, onVoltar, onSalvar }) {
               </p>
             </div>
           </div>
+        </div>
         </div>
       </div>
 
@@ -2638,7 +2643,7 @@ function Relatorios({ historico, tarifa, onRegistrarConta }) {
                     </div>
                     <div>
                       <p style={{ margin: 0, fontSize: 11.5, color: COLORS.inkSoft, fontWeight: 600, lineHeight: 1.4 }}>Valor Pago</p>
-                      <p style={{ margin: "4px 0 0", fontSize: 15, fontWeight: 700, color: COLORS.blue }}>
+                      <p style={{ margin: "4px 0 0", fontSize: 15, fontWeight: 700, color: valorReal != null ? (valorReal <= valorPrevisto ? COLORS.green : COLORS.alert) : COLORS.blue }}>
                         {valorReal != null ? fmtR(valorReal) : "—"}
                       </p>
                     </div>
@@ -2692,8 +2697,13 @@ function Ajustes({
     residenciaDraft.jardim !== residencia.jardim ||
     residenciaDraft.piscina !== residencia.piscina ||
     (residenciaDraft.piscina && residenciaDraft.capacidadePiscina !== residencia.capacidadePiscina);
-  const novoConsumoAlvoL = Math.round(consumoBaseM3 * 1000 * (1 - metaDraft / 100));
-  const economiaPrevistaL = Math.round(consumoBaseM3 * 1000) - novoConsumoAlvoL;
+  // Consumo estimado da residência (antes da economia) e meta mensal (depois da
+  // economia) — recalculados a partir dos MESMOS dados e da MESMA fórmula da tela
+  // inicial (calcularMetaMensalL), usando sempre o rascunho atual da residência e
+  // do percentual, para refletir qualquer alteração em tempo real.
+  const consumoEstimadoResidenciaL = calcularMetaMensalL(residenciaDraft);
+  const novoConsumoAlvoL = Math.round(consumoEstimadoResidenciaL * (1 - metaDraft / 100));
+  const economiaPrevistaL = consumoEstimadoResidenciaL - novoConsumoAlvoL;
 
   function salvarAlteracoes() {
     setMetaPercentual(metaDraft);
@@ -2742,14 +2752,20 @@ function Ajustes({
           <span aria-hidden="true" style={{ fontWeight: 700, fontSize: 16, color: COLORS.blue, minWidth: 44, textAlign: "right" }}>{metaDraft}%</span>
         </div>
 
-        <div style={{ padding: "14px 16px", background: "#E4F2FB", borderRadius: 16, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div>
-            <p style={{ margin: 0, fontSize: 11.5, color: COLORS.inkSoft, fontWeight: 700 }}>META MENSAL</p>
-            <p style={{ fontFamily: FONT_DISPLAY, fontSize: 22, margin: "2px 0 0", color: COLORS.green, fontWeight: 700 }}>{fmtL(novoConsumoAlvoL)}</p>
+        <div style={{ padding: "14px 16px", background: "#E4F2FB", borderRadius: 16 }}>
+          <div style={{ marginBottom: 14 }}>
+            <p style={{ margin: 0, fontSize: 11.5, color: COLORS.inkSoft, fontWeight: 700 }}>CONSUMO ESTIMADO DA RESIDÊNCIA</p>
+            <p style={{ fontFamily: FONT_DISPLAY, fontSize: 22, margin: "2px 0 0", color: COLORS.ink, fontWeight: 700 }}>{fmtL(consumoEstimadoResidenciaL)}</p>
           </div>
-          <div style={{ textAlign: "right" }}>
-            <p style={{ margin: 0, fontSize: 11.5, color: COLORS.inkSoft, fontWeight: 700 }}>ECONOMIA PREVISTA</p>
-            <p style={{ fontFamily: FONT_DISPLAY, fontSize: 22, margin: "2px 0 0", color: COLORS.blue, fontWeight: 700 }}>{fmtL(economiaPrevistaL)} ({metaDraft}%)</p>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div>
+              <p style={{ margin: 0, fontSize: 11.5, color: COLORS.inkSoft, fontWeight: 700 }}>META MENSAL</p>
+              <p style={{ fontFamily: FONT_DISPLAY, fontSize: 22, margin: "2px 0 0", color: COLORS.ink, fontWeight: 700 }}>{fmtL(novoConsumoAlvoL)}</p>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <p style={{ margin: 0, fontSize: 11.5, color: COLORS.inkSoft, fontWeight: 700 }}>ECONOMIA PREVISTA</p>
+              <p style={{ fontFamily: FONT_DISPLAY, fontSize: 22, margin: "2px 0 0", color: COLORS.blue, fontWeight: 700 }}>{fmtL(economiaPrevistaL)} ({metaDraft}%)</p>
+            </div>
           </div>
         </div>
       </Card>
