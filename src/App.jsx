@@ -407,11 +407,19 @@ export default function App() {
     return gerarSemanasDoMes(new Date()).semanas;
   });
 
-  // Histórico persiste entre sessões.
+  // Histórico persiste entre sessões — só é restaurado se for, de fato,
+  // um array de meses finalizados pelo usuário (evita herdar dados
+  // inválidos/antigos do localStorage e exibir gráficos, linha do tempo
+  // ou o card de conta pendente já preenchidos na primeira abertura).
   const [historico, setHistorico] = useState(() => {
     try {
       const salvo = localStorage.getItem("aqua_historico");
-      if (salvo) return JSON.parse(salvo);
+      if (salvo) {
+        const parsed = JSON.parse(salvo);
+        if (Array.isArray(parsed)) {
+          return parsed.filter((h) => h && typeof h === "object" && h.mes);
+        }
+      }
     } catch (_) {}
     return HISTORICO_INICIAL;
   });
