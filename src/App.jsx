@@ -740,7 +740,10 @@ export default function App() {
     const baseCongelada = consumoBaseEstimadoL;
     const atividadesCongeladas = consumoAtividadesL;
     const consumoConsolidadoCongelado = consumoTotalMesL; // base + atividades, já somados
-    const valorPrevistoCongelado = +(metaCongelada / 1000 * tarifa).toFixed(2);
+    // "Estimado" no histórico deve refletir o que foi realmente consumido até o
+    // momento da finalização (igual ao card "Conta estimada até agora"), e não
+    // a Meta do mês inteiro — por isso usa consumoConsolidadoCongelado aqui.
+    const valorPrevistoCongelado = +(consumoConsolidadoCongelado / 1000 * tarifa).toFixed(2);
 
     // Adiciona ao histórico apenas se ainda não existir entrada pendente para este mês
     const jaPendente = historico.some(
@@ -813,7 +816,7 @@ export default function App() {
             previstoL: metaOperacionalL,
             // Consumo consolidado: base acumulado + atividades registradas (já somados em consumoTotalMesL).
             realL: consumoTotalMesL,
-            valorPrevisto: +(metaOperacionalL / 1000 * tarifa).toFixed(2),
+            valorPrevisto: +(consumoTotalMesL / 1000 * tarifa).toFixed(2),
             valorReal: valorPago,
             baseL: consumoBaseEstimadoL,
             atividadesL: consumoAtividadesL,
