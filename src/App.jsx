@@ -74,10 +74,17 @@ const CARD_INFO_STYLE = {
 /* ---------------------------------------------------------------------------
    Constantes de cálculo (consumo médio por pessoa, taxas de atividades)
 --------------------------------------------------------------------------- */
-/* Consumo diário base por pessoa, usado para calcular a meta mensal de consumo.
-   Fonte: ANA (PNCDA), SABESP — taxas de uso por atividade doméstica. */
-const CONSUMO_PESSOA_DIA_L = 120; // L/dia por pessoa (consumo base da aplicação)
-const CONSUMO_PESSOA_MES_L = CONSUMO_PESSOA_DIA_L * 30; // 3600 L/mês por pessoa
+/* Consumo Base (Estimado): representa atividades cotidianas que o usuário
+   normalmente NÃO registra manualmente — beber água, cozinhar, escovar os
+   dentes, lavar as mãos e pequenos usos de torneira.
+   Fonte: ANA (PNCDA) — parcela de consumo indireto/não mensurável por uso. */
+const CONSUMO_BASE_DIARIO_PESSOA_L = 90; // L/dia por pessoa — consumo base não registrado
+
+/* Margem mensal destinada às atividades registradas (banho, roupa, louça,
+   carro, calçada etc.) usada para compor a Meta Mensal. Valor fixo definido
+   à parte do Consumo Base — não é recalculado automaticamente se o Consumo
+   Base mudar; ajuste manualmente aqui caso necessário. */
+const MARGEM_ATIVIDADES_PESSOA_DIA_L = 95; // L/dia por pessoa — margem p/ atividades registradas
 
 /* Jardim: 3 regas/semana × 10 min × 10 L/min × ~5 semanas = 1500 L/mês.
    Fonte: ANA — mangueira doméstica 10-15 L/min; frequência observada em clima tropical. */
@@ -92,23 +99,44 @@ const AJUSTE_PISCINA_FATOR = 0.10;
 const FATOR_APARTAMENTO = 0.88; // apartamento reduz 12% do consumo base
 const TARIFA_PADRAO = 8.5; // R$ por m³
 
-/* Calcula a meta mensal (consumo base estimado) em litros:
-   consumo_base = moradores × 3600 L/mês  (120 L/dia por pessoa)
-   ajuste_tipo  = consumo_base × 0.88     (somente apartamento — SNIS 2022)
-   ajuste_jardim= 1500 L/mês fixo         (ANA: 3 regas/semana × 10 min × 10 L/min)
-   ajuste_piscina = capacidade × 10 %    (ANA/CAESB: evaporação + reposição mensal)
-   Proteção: moradores mínimo 1 para evitar meta zero. */
-function calcularMetaMensalL(residencia) {
+/* Consumo Base Acumulado (em litros): cresce automaticamente a cada dia do
+   mês que passa, sem qualquer ação do usuário.
+   Fórmula: 25 L × número de moradores × dias decorridos no mês.
+   Proteção: moradores mínimo 1; dias mínimo 0 (nunca negativo). */
+function calcularConsumoBaseAcumuladoL(residencia, diasDecorridos) {
   const moradores = Math.max(1, residencia.moradores || 1);
-  let consumoBase = moradores * CONSUMO_PESSOA_MES_L;
+  const dias = Math.max(0, diasDecorridos || 0);
+  return Math.round(CONSUMO_BASE_DIARIO_PESSOA_L * moradores * dias);
+}
+
+/* Margem mensal destinada às atividades registradas, usada para compor a
+   Meta Mensal. Aplica os mesmos ajustes de perfil da residência (tipo,
+   jardim, piscina) que antes compunham a estimativa geral de consumo. */
+function calcularMargemAtividadesL(residencia, totalDiasMes) {
+  const moradores = Math.max(1, residencia.moradores || 1);
+  const dias = Math.max(1, totalDiasMes || 30);
+  let margem = moradores * MARGEM_ATIVIDADES_PESSOA_DIA_L * dias;
   if (residencia.tipo === "apartamento") {
-    consumoBase = consumoBase * FATOR_APARTAMENTO;
+    margem = margem * FATOR_APARTAMENTO;
   }
   const ajusteJardim = residencia.jardim ? AJUSTE_JARDIM_L : 0;
   const ajustePiscina = residencia.piscina
     ? Math.round((residencia.capacidadePiscina || 5000) * AJUSTE_PISCINA_FATOR)
     : 0;
-  return Math.round(consumoBase + ajusteJardim + ajustePiscina);
+  return Math.round(margem + ajusteJardim + ajustePiscina);
+}
+
+/* Calcula a Meta Mensal (limite de consumo desejado para o mês inteiro) em litros:
+   meta = (Consumo Base Diário × moradores × dias do mês) + margem p/ atividades registradas
+   O parâmetro totalDiasMes tem padrão 30 para contextos em que o mês ativo
+   ainda não está definido (ex.: tela de cadastro).
+   Proteção: moradores mínimo 1 para evitar meta zero. */
+function calcularMetaMensalL(residencia, totalDiasMes = 30) {
+  const moradores = Math.max(1, residencia.moradores || 1);
+  const dias = Math.max(1, totalDiasMes || 30);
+  const baseMensal = CONSUMO_BASE_DIARIO_PESSOA_L * moradores * dias;
+  const margemAtividades = calcularMargemAtividadesL(residencia, dias);
+  return Math.round(baseMensal + margemAtividades);
 }
 
 const TAXAS = {
@@ -430,6 +458,19 @@ export default function App() {
     return salvo ? new Date(salvo) : null;
   });
 
+  // Data a partir da qual o Consumo Base passa a contar. Sem isso, o cálculo
+  // usava sempre o 1º dia do mês como início — então cadastrar (ou limpar
+  // dados) no meio do mês fazia o Consumo Base "nascer" já com vários dias
+  // acumulados de uma vez, em vez de começar do zero e crescer só a partir de
+  // agora. É gravada ao finalizar o cadastro e ao limpar os dados.
+  const [dataInicioRastreio, setDataInicioRastreio] = useState(() => {
+    const salvo = localStorage.getItem("aqua_dataInicioRastreio");
+    return salvo || formatarISOLocal(new Date());
+  });
+  useEffect(() => {
+    localStorage.setItem("aqua_dataInicioRastreio", dataInicioRastreio);
+  }, [dataInicioRastreio]);
+
   // true se há um mês ativo salvo manualmente — impede o sync automático
   // de reverter o mês para o calendário do dispositivo.
   const [mesFinalizadoManualmente, setMesFinalizadoManualmente] = useState(
@@ -449,9 +490,9 @@ export default function App() {
 
   const [toastUndo, setToastUndo] = useState(null); // { msg, onUndo }
 
-  const showToast = useCallback((msg, tipo = "ok") => {
+  const showToast = useCallback((msg, tipo = "ok", duracaoMs = 2400) => {
     setToast({ msg, tipo });
-    setTimeout(() => setToast(null), 2400);
+    setTimeout(() => setToast(null), duracaoMs);
   }, []);
 
   // Persiste as semanas no localStorage sempre que mudarem (quando há mês ativo salvo).
@@ -494,47 +535,115 @@ export default function App() {
 
   /* ---- cálculos derivados ---- */
   // META mensal (consumo ideal) calculada a partir do perfil da residência —
-  // já fica disponível assim que o cadastro é concluído.
+  // dias_passados = até o fim da última semana já iniciada/concluída, limitado
+  // ao último dia do mês de referência (mín. 1)
+  const mesRefIdx = NOMES_MES.indexOf(mesInfo.nomeMes);
+  const ultimoDiaDoMes = new Date(mesInfo.ano, mesRefIdx + 1, 0).getDate();
+  const primeiroDiaDoMes = new Date(mesInfo.ano, mesRefIdx, 1);
+  const parseDataLocal = (iso) => {
+    const [y, m, d] = iso.split("-").map(Number);
+    return new Date(y, m - 1, d);
+  };
+  // Início efetivo da contagem do Consumo Base: o mais tardio entre o 1º dia
+  // do mês e a data de início do rastreio (cadastro ou última limpeza de
+  // dados). Isso evita que o Consumo Base "nasça" já com vários dias
+  // retroativos somados quando o cadastro (ou uma limpeza de dados) acontece
+  // no meio do mês — a contagem sempre começa do zero a partir desse marco.
+  const dataInicioRastreioDate = (() => {
+    try {
+      const d = parseDataLocal(dataInicioRastreio);
+      return isNaN(d.getTime()) ? primeiroDiaDoMes : d;
+    } catch (_) {
+      return primeiroDiaDoMes;
+    }
+  })();
+  const dataInicioEfetiva = dataInicioRastreioDate > primeiroDiaDoMes ? dataInicioRastreioDate : primeiroDiaDoMes;
+  // dias_passados = soma gradual dos dias já decorridos por semana.
+  // Baseado SOMENTE na data real de hoje comparada com o período (dataInicio–
+  // dataFim) de cada semana — nunca no status "naoiniciada"/"andamento".
+  // Antes, uma semana só passava a contar seus dias quando o usuário
+  // registrava a 1ª atividade nela (o que mudava o status para "andamento").
+  // Isso fazia vários dias de Consumo Base "aparecerem de uma vez" no
+  // momento do registro, causando saltos incoerentes na tela principal.
+  // Agora o Consumo Base cresce dia a dia pelo calendário, independente de
+  // qualquer ação do usuário — registrar uma atividade nunca deve alterar o
+  // Consumo Base, só o total de atividades.
+  const hoje = new Date();
+  const hojeSemHora = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
+  const diasPassadosMes = Math.min(
+    ultimoDiaDoMes,
+    Math.max(
+      1,
+      semanas.reduce((acc, s) => {
+        const inicioSemanaReal = parseDataLocal(s.dataInicio);
+        const fimSemana = parseDataLocal(s.dataFim);
+        // semana termina antes do início efetivo do rastreio: não conta nada
+        if (fimSemana < dataInicioEfetiva) {
+          return acc;
+        }
+        // início real da semana, "cortado" pelo início efetivo do rastreio
+        const inicioSemana = inicioSemanaReal < dataInicioEfetiva ? dataInicioEfetiva : inicioSemanaReal;
+        // Semana finalizada manualmente (mesmo antes do fim natural do
+        // período): conta do início efetivo até o fim real dela.
+        if (s.status === "concluida") {
+          return acc + (Math.floor((fimSemana - inicioSemana) / 86400000) + 1);
+        }
+        if (hojeSemHora > fimSemana) {
+          // semana já passou completamente no calendário real
+          return acc + (Math.floor((fimSemana - inicioSemana) / 86400000) + 1);
+        }
+        if (hojeSemHora >= inicioSemana && hojeSemHora <= fimSemana) {
+          // dentro do intervalo real da semana: conta os dias já decorridos de fato
+          return acc + (Math.floor((hojeSemHora - inicioSemana) / 86400000) + 1);
+        }
+        // semana futura no calendário: ainda não conta nenhum dia
+        return acc;
+      }, 0)
+    )
+  );
+
+  // META MENSAL: limite de consumo desejado para o mês inteiro —
+  // (Consumo Base Diário × moradores × dias do mês) + margem p/ atividades,
+  // com o percentual de economia configurado pelo usuário aplicado por cima.
   const metaOperacionalL = useMemo(
-    () => Math.round(calcularMetaMensalL(residencia) * (1 - metaPercentual / 100)),
-    [residencia, metaPercentual]
+    () => Math.round(calcularMetaMensalL(residencia, ultimoDiaDoMes) * (1 - metaPercentual / 100)),
+    [residencia, metaPercentual, ultimoDiaDoMes]
   );
   const consumoBaseM3 = +(metaOperacionalL / 1000).toFixed(1);
   const consumoBaseL = metaOperacionalL;
 
-  const consumoTotalMesL = useMemo(
+  // CONSUMO BASE (ESTIMADO): atividades cotidianas que o usuário não
+  // registra manualmente (beber água, cozinhar, escovar os dentes, lavar as
+  // mãos). Cresce automaticamente a cada dia decorrido do mês — não depende
+  // de nenhuma ação do usuário. Fórmula: 25 L × moradores × dias decorridos.
+  const consumoBaseEstimadoL = useMemo(
+    () => calcularConsumoBaseAcumuladoL(residencia, diasPassadosMes),
+    [residencia, diasPassadosMes]
+  );
+
+  // ATIVIDADES REGISTRADAS: soma de tudo o que o usuário lançou manualmente
+  // (banho, roupa, louça, carro, jardim, piscina, etc.) ao longo do mês.
+  const consumoAtividadesL = useMemo(
     () => semanas.reduce((acc, s) => acc + s.consumoL, 0),
     [semanas]
   );
+
+  // CONSUMO TOTAL = Consumo Base Acumulado + Soma das Atividades Registradas.
+  // Atualizado em tempo real: o Consumo Base entra no total assim que os
+  // dias passam, sem esperar o fechamento do mês.
+  const consumoTotalMesL = consumoBaseEstimadoL + consumoAtividadesL;
 
   const restamL = Math.max(metaOperacionalL - consumoTotalMesL, 0);
   const percentualMeta = clamp(metaOperacionalL > 0 ? Math.round((consumoTotalMesL / metaOperacionalL) * 100) : 0, 0, 999);
   const dentroDaMeta = consumoTotalMesL <= metaOperacionalL;
 
-  // dias_passados = até o fim da última semana já iniciada/concluída, limitado
-  // ao último dia do mês de referência (mín. 1)
-  const mesRefIdx = NOMES_MES.indexOf(mesInfo.nomeMes);
-  const ultimoDiaDoMes = new Date(mesInfo.ano, mesRefIdx + 1, 0).getDate();
-  const parseDataLocal = (iso) => {
-    const [y, m, d] = iso.split("-").map(Number);
-    return new Date(y, m - 1, d);
-  };
-  const diasPassadosMes = Math.max(
-    1,
-    semanas.reduce((max, s) => {
-      if (s.status === "naoiniciada") return max;
-      const fimData = parseDataLocal(s.dataFim);
-      // se a semana terminar no mês seguinte, já passamos o mês inteiro
-      const diaReal = fimData.getMonth() === mesRefIdx ? fimData.getDate() : ultimoDiaDoMes;
-      return Math.max(max, diaReal);
-    }, 0)
-  );
   const mediaDiariaPessoa = Math.round(consumoTotalMesL / Math.max(1, residencia.moradores) / diasPassadosMes);
   const valorEstimado = +(consumoTotalMesL / 1000 * tarifa).toFixed(2);
 
   /* ---- handlers de fluxo ---- */
   const finalizarCadastro = () => {
     setFase("app");
+    setDataInicioRastreio(formatarISOLocal(new Date()));
     showToast("Residência cadastrada com sucesso!");
   };
 
@@ -621,12 +730,16 @@ export default function App() {
   const encerrarMesAgora = () => {
     setConfirmarFinalizarMes(false);
 
-    // Congela os valores ANTES de qualquer setState
+    // Congela os valores ANTES de qualquer setState.
+    // O Consumo Base já vem sendo somado ao Consumo Total dia a dia durante
+    // o mês (ver cálculo de consumoTotalMesL) — aqui só tiramos uma "foto"
+    // final dos números para o histórico, sem somar nada de novo.
     const mesFinalizado = mesInfo.nomeMes;
     const anoFinalizado = mesInfo.ano;
     const metaCongelada = metaOperacionalL;
-    const consumoCongelado = consumoTotalMesL;
-    const baseCongelada = consumoBaseL;
+    const baseCongelada = consumoBaseEstimadoL;
+    const atividadesCongeladas = consumoAtividadesL;
+    const consumoConsolidadoCongelado = consumoTotalMesL; // base + atividades, já somados
     const valorPrevistoCongelado = +(metaCongelada / 1000 * tarifa).toFixed(2);
 
     // Adiciona ao histórico apenas se ainda não existir entrada pendente para este mês
@@ -641,10 +754,12 @@ export default function App() {
             mes: mesFinalizado,
             ano: anoFinalizado,
             previstoL: metaCongelada,
-            realL: consumoCongelado,
+            // Consumo consolidado (base acumulado + atividades) salvo no histórico.
+            realL: consumoConsolidadoCongelado,
             valorPrevisto: valorPrevistoCongelado,
             valorReal: null,
             baseL: baseCongelada,
+            atividadesL: atividadesCongeladas,
             contaRegistrada: false,
           },
         ];
@@ -675,7 +790,7 @@ export default function App() {
     setSemanas(novoMesInfo.semanas);
     setSemanaAtivaIdx(0);
 
-    showToast("Mês finalizado! Novo mês iniciado.");
+    showToast("Mês finalizado! O consumo consolidado foi salvo no histórico e um novo mês foi iniciado.");
   };
 
   const salvarContaReal = ({ valorPago, mes }) => {
@@ -696,10 +811,12 @@ export default function App() {
             mes,
             ano: anoAtual,
             previstoL: metaOperacionalL,
+            // Consumo consolidado: base acumulado + atividades registradas (já somados em consumoTotalMesL).
             realL: consumoTotalMesL,
             valorPrevisto: +(metaOperacionalL / 1000 * tarifa).toFixed(2),
             valorReal: valorPago,
-            baseL: consumoBaseL,
+            baseL: consumoBaseEstimadoL,
+            atividadesL: consumoAtividadesL,
             contaRegistrada: true,
           },
         ];
@@ -746,6 +863,8 @@ export default function App() {
                   nomeMes={mesInfo.nomeMes}
                   ano={mesInfo.ano}
                   consumoTotalMesL={consumoTotalMesL}
+                  consumoBaseEstimadoL={consumoBaseEstimadoL}
+                  consumoAtividadesL={consumoAtividadesL}
                   metaOperacionalL={metaOperacionalL}
                   restamL={restamL}
                   percentualMeta={percentualMeta}
@@ -804,10 +923,13 @@ export default function App() {
                     setSemanaAtivaIdx(0);
                     setHistorico([]);
                     setMesFinalizadoManualmente(false);
+                    const hojeISO = formatarISOLocal(hoje);
+                    setDataInicioRastreio(hojeISO);
                     localStorage.removeItem("aqua_mesAtivo");
                     localStorage.removeItem("aqua_semanas");
                     localStorage.removeItem("aqua_historico");
                     localStorage.removeItem("aqua_dataEncerramentoMes");
+                    localStorage.setItem("aqua_dataInicioRastreio", hojeISO);
                     showToast("Dados limpos.", "info");
                   }}
                 />
@@ -864,6 +986,8 @@ export default function App() {
         {confirmarFinalizarMes && (
           <ConfirmarFinalizarMes
             semanasFaltando={semanasFaltando}
+            consumoBaseEstimadoL={consumoBaseEstimadoL}
+            consumoAtividadesL={consumoAtividadesL}
             onVoltar={() => setConfirmarFinalizarMes(false)}
             onConfirmar={encerrarMesAgora}
           />
@@ -881,12 +1005,13 @@ export default function App() {
   );
 }
 
-function ConfirmarFinalizarMes({ semanasFaltando, onVoltar, onConfirmar }) {
+function ConfirmarFinalizarMes({ semanasFaltando, consumoBaseEstimadoL = 0, consumoAtividadesL = 0, onVoltar, onConfirmar }) {
   const tudoConcluido = semanasFaltando.length === 0;
   const listaSemanas = semanasFaltando.map((s) => `Semana ${s.numero}`);
   const fraseSemanas = listaSemanas.length <= 1
     ? listaSemanas.join("")
     : `${listaSemanas.slice(0, -1).join(", ")} e ${listaSemanas[listaSemanas.length - 1]}`;
+  const consumoConsolidadoL = consumoBaseEstimadoL + consumoAtividadesL;
 
   return (
     <div style={{
@@ -914,7 +1039,7 @@ function ConfirmarFinalizarMes({ semanasFaltando, onVoltar, onConfirmar }) {
         </div>
 
         {tudoConcluido ? (
-          <p style={{ margin: "0 0 18px", fontSize: 13.5, color: COLORS.inkSoft, lineHeight: 1.5, textAlign: "center" }}>
+          <p style={{ margin: "0 0 14px", fontSize: 13.5, color: COLORS.inkSoft, lineHeight: 1.5, textAlign: "center" }}>
             Todas as semanas já foram concluídas. Ao confirmar, um novo mês será iniciado.
           </p>
         ) : (
@@ -925,11 +1050,32 @@ function ConfirmarFinalizarMes({ semanasFaltando, onVoltar, onConfirmar }) {
             <p style={{ margin: "0 0 16px", fontSize: 13.5, color: COLORS.ink, lineHeight: 1.5 }}>
               <strong>Semanas faltando:</strong> {fraseSemanas}.
             </p>
-            <p style={{ margin: "0 0 18px", fontSize: 13.5, fontWeight: 600, color: COLORS.ink }}>
-              Deseja continuar?
-            </p>
           </>
         )}
+
+        {/* Resumo do consumo que será consolidado ao finalizar o mês */}
+        <div style={{
+          background: COLORS.bg, border: `1.5px solid ${COLORS.line}`, borderRadius: 14,
+          padding: "12px 14px", marginBottom: 16,
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 0" }}>
+            <span style={{ fontSize: 12.5, color: COLORS.inkSoft }}>Consumo base estimado</span>
+            <span style={{ fontSize: 13.5, fontWeight: 700, color: COLORS.ink }}>{fmtL(consumoBaseEstimadoL)}</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 0" }}>
+            <span style={{ fontSize: 12.5, color: COLORS.inkSoft }}>Consumo das atividades registradas</span>
+            <span style={{ fontSize: 13.5, fontWeight: 700, color: COLORS.ink }}>{fmtL(consumoAtividadesL)}</span>
+          </div>
+          <div style={{ height: 1, background: COLORS.line, margin: "6px 0" }} />
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 0" }}>
+            <span style={{ fontSize: 12.5, fontWeight: 700, color: COLORS.ink }}>Consumo consolidado final</span>
+            <span style={{ fontSize: 15, fontWeight: 700, color: COLORS.green }}>{fmtL(consumoConsolidadoL)}</span>
+          </div>
+        </div>
+
+        <p style={{ margin: "0 0 18px", fontSize: 13.5, fontWeight: 600, color: COLORS.ink, textAlign: "center" }}>
+          Deseja continuar?
+        </p>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <button
@@ -1545,10 +1691,12 @@ function BottomNav({ tab, setTab }) {
    4. Dashboard
 ============================================================================ */
 function Dashboard({
-  residencia, nomeMes, ano, consumoTotalMesL, metaOperacionalL, restamL, percentualMeta,
+  residencia, nomeMes, ano, consumoTotalMesL, consumoBaseEstimadoL, consumoAtividadesL,
+  metaOperacionalL, restamL, percentualMeta,
   dentroDaMeta, mediaDiariaPessoa, valorEstimado, historico, mesPendente, semanas,
   onAbrirSemana, onAdicionar, onFinalizarMes, onRegistrarConta, metaPercentual, onIrAjustes,
 }) {
+  const [mostrarInfoBase, setMostrarInfoBase] = useState(false);
   const extras = [];
   if (residencia.jardim) extras.push("jardim");
   if (residencia.piscina) extras.push("piscina");
@@ -1567,19 +1715,19 @@ function Dashboard({
         </h1>
       </div>
 
-      {/* Card principal — consumo do mês + meta */}
+      {/* Card principal — consumo total do mês + meta mensal */}
       <Card style={{ padding: 20, display: "flex", alignItems: "center", gap: 16 }}>
         <div style={{ flex: 1 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
             <Droplet size={15} color={COLORS.blue} fill={COLORS.blue} />
-            <span style={{ fontSize: 12.5, color: COLORS.inkSoft, fontWeight: 600, lineHeight: 1.4 }}>Consumo deste mês</span>
+            <span style={{ fontSize: 12.5, color: COLORS.inkSoft, fontWeight: 600, lineHeight: 1.4 }}>Consumo Total do mês</span>
           </div>
           <p style={{ fontFamily: FONT_DISPLAY, fontSize: 30, margin: "0 0 10px", color: COLORS.ink, fontWeight: 700 }}>
             {fmtL(consumoTotalMesL)}
           </p>
           <ProgressBar pct={percentualMeta} />
           <p style={{ margin: "10px 0 0", fontSize: 13, color: COLORS.inkSoft }}>
-            de <strong style={{ color: COLORS.ink }}>{fmtL(metaOperacionalL)}</strong> (meta do mês)
+            de <strong style={{ color: COLORS.ink }}>{fmtL(metaOperacionalL)}</strong> (Meta Mensal)
           </p>
           <span style={{
             marginTop: 8, display: "inline-flex", alignItems: "center", gap: 4,
@@ -1593,6 +1741,37 @@ function Dashboard({
         </div>
         <DropGaugeCircle percentual={percentualMeta} size={86} />
       </Card>
+
+      {/* Detalhamento: Consumo Base (Estimado) + Atividades Registradas */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
+        <Card style={{ padding: "14px 14px", display: "flex", flexDirection: "column", gap: 4 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <span style={{ fontSize: 11, color: COLORS.inkSoft, fontWeight: 600, lineHeight: 1.3 }}>Consumo Base (Estimado)</span>
+            <button
+              onClick={() => setMostrarInfoBase((v) => !v)}
+              aria-label="O que é o Consumo Base (Estimado)?"
+              aria-expanded={mostrarInfoBase}
+              style={{ background: "none", border: "none", padding: 2, display: "flex", cursor: "pointer", flexShrink: 0 }}
+            >
+              <Info size={13} color={COLORS.blue} />
+            </button>
+          </div>
+          <p style={{ fontFamily: FONT_DISPLAY, fontSize: 18, margin: 0, color: COLORS.ink, fontWeight: 700 }}>
+            {fmtL(consumoBaseEstimadoL)}
+          </p>
+          {mostrarInfoBase && (
+            <p style={{ margin: "2px 0 0", fontSize: 10.5, color: COLORS.inkSoft, lineHeight: 1.5 }}>
+              Estimativa do consumo diário referente às atividades básicas que normalmente não são registradas, como beber água, cozinhar, escovar os dentes e lavar as mãos.
+            </p>
+          )}
+        </Card>
+        <Card style={{ padding: "14px 14px", display: "flex", flexDirection: "column", gap: 4 }}>
+          <span style={{ fontSize: 11, color: COLORS.inkSoft, fontWeight: 600, lineHeight: 1.3 }}>Atividades Registradas</span>
+          <p style={{ fontFamily: FONT_DISPLAY, fontSize: 18, margin: 0, color: COLORS.ink, fontWeight: 700 }}>
+            {fmtL(consumoAtividadesL)}
+          </p>
+        </Card>
+      </div>
 
       <div style={{
         marginTop: 12, padding: "14px 16px", borderRadius: 18,
